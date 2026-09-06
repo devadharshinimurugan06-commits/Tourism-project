@@ -1,4 +1,3 @@
-
 import os
 import pickle
 import joblib
@@ -25,6 +24,7 @@ FILES = {
     "tfidf": "tfidf_vectorizer.pkl",
     "cosine": "cosine_similarity.pkl",
     "rec_data": "attraction_recommendation_data.pkl",
+    "prep_objects": "preprocessing_objects.pkl",
 }
 
 def p(name):
@@ -82,17 +82,14 @@ raw = load_raw()
 # The model feature names are used as the final column contract.
 # ------------------------------------------------------------
 
-NUMERIC = [
-    "VisitYear", "VisitMonth", "VisitQuarter",
-    "User_Avg_Rating", "User_Visit_Count",
-    "Attraction_Avg_Rating", "Attraction_Popularity",
-    "Log_User_Visits", "Log_Attraction_Popularity"
-]
-CATEGORICAL = ["Continent", "Region", "Country", "AttractionType", "Season"]
 MODE_LABELS = ["Business", "Couples", "Family", "Friends", "Solo"]
 
 @st.cache_data
-def build_training_tables(raw):
+def build_display_data(raw):
+    """Merge the raw lookup tables purely so the UI can list users/attractions
+    and read a user's Country/Region/Continent or an attraction's AttractionType.
+    This performs no statistics/encoder fitting, so the result is a plain,
+    picklable DataFrame that st.cache_data can serialize without issue."""
     tx = raw["Transaction.xlsx"].copy()
     user = raw["User.xlsx"].copy()
     city = raw["City.xlsx"].copy()
@@ -102,7 +99,6 @@ def build_training_tables(raw):
     typ = raw["Type.xlsx"].copy()
     item = raw["Updated_Item.xlsx"].copy()
 
-    # Transaction VisitMode is the numeric target id.
     df = tx.merge(user, on="UserId", how="left")
     df = df.merge(city, on="CityId", how="left", suffixes=("", "_city"))
     df = df.merge(country, on="CountryId", how="left", suffixes=("", "_country"))
@@ -110,108 +106,43 @@ def build_training_tables(raw):
     df = df.merge(continent, on="ContinentId", how="left", suffixes=("", "_cont"))
     df = df.merge(item, on="AttractionId", how="left")
     df = df.merge(typ, on="AttractionTypeId", how="left")
-
-    # Match the project's 70/15/15 stratified split exactly.
-    idx = np.arange(len(df))
-    from sklearn.model_selection import train_test_split
-    idx_train, idx_tmp = train_test_split(
-        idx, test_size=0.30, random_state=42, stratify=df["VisitMode"]
-    )
-    idx_val, idx_test = train_test_split(
-        idx_tmp, test_size=0.50, random_state=42,
-        stratify=df.iloc[idx_tmp]["VisitMode"]
-    )
-
-    train = df.iloc[idx_train].copy()
-
-    # Train-only statistics.
-    user_sum = train.groupby("UserId")["Rating"].sum()
-    user_cnt = train.groupby("UserId")["Rating"].count()
-    attr_sum = train.groupby("AttractionId")["Rating"].sum()
-    attr_cnt = train.groupby("AttractionId")["Rating"].count()
-    max_attr = float(attr_cnt.max())
-
-    def add_features(frame, training=False):
-        x = frame.copy()
-
-        if training:
-            us = x["UserId"].map(user_sum).astype(float) - x["Rating"]
-            uc = x["UserId"].map(user_cnt).astype(float) - 1
-            ats = x["AttractionId"].map(attr_sum).astype(float) - x["Rating"]
-            atc = x["AttractionId"].map(attr_cnt).astype(float) - 1
-
-            global_mean = float(train["Rating"].mean())
-            x["User_Avg_Rating"] = (us / uc.replace(0, np.nan)).fillna(global_mean)
-            x["Attraction_Avg_Rating"] = (ats / atc.replace(0, np.nan)).fillna(global_mean)
-        else:
-            global_mean = float(train["Rating"].mean())
-            x["User_Avg_Rating"] = x["UserId"].map(user_sum / user_cnt).fillna(global_mean)
-            x["Attraction_Avg_Rating"] = x["AttractionId"].map(attr_sum / attr_cnt).fillna(global_mean)
-
-        x["User_Visit_Count"] = x["UserId"].map(user_cnt).fillna(0.0)
-        x["Attraction_Popularity"] = (
-            x["AttractionId"].map(attr_cnt).fillna(0.0) / max_attr
-        )
-        x["Log_User_Visits"] = np.log1p(x["User_Visit_Count"])
-        x["Log_Attraction_Popularity"] = np.log1p(x["Attraction_Popularity"])
-
-        x["VisitQuarter"] = ((x["VisitMonth"] - 1) // 3 + 1).astype(int)
-        season_map = {
-            1: "Winter", 2: "Winter",
-            3: "Spring", 4: "Spring", 5: "Spring",
-            6: "Summer", 7: "Summer", 8: "Summer",
-            9: "Autumn", 10: "Autumn", 11: "Autumn",
-            12: "Winter"
-        }
-        x["Season"] = x["VisitMonth"].map(season_map)
-
-        for c in CATEGORICAL:
-            x[c] = x[c].fillna("Unknown").astype(str)
-
-        return x
-
-    train_f = add_features(train, True)
-    all_f = add_features(df, False)
-
-    ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
-    ohe.fit(train_f[CATEGORICAL])
-
-    scaler = StandardScaler()
-    scaler.fit(train_f[NUMERIC])
-
-    # Full-train user-mode probabilities for app-time inference.
-    mode_counts = train.groupby(["UserId", "VisitMode"]).size().unstack(fill_value=0)
-    mode_probs = mode_counts.div(mode_counts.sum(axis=1), axis=0)
-    mode_probs = mode_probs.reindex(columns=[1, 2, 3, 4, 5], fill_value=0.0)
-    global_probs = train["VisitMode"].value_counts(normalize=True).reindex(
-        [1, 2, 3, 4, 5], fill_value=0.0
-    )
-
-    return {
-        "df": df,
-        "train": train,
-        "user_sum": user_sum,
-        "user_cnt": user_cnt,
-        "attr_sum": attr_sum,
-        "attr_cnt": attr_cnt,
-        "max_attr": max_attr,
-        "global_mean": float(train["Rating"].mean()),
-        "ohe": ohe,
-        "scaler": scaler,
-        "mode_probs": mode_probs,
-        "global_probs": global_probs,
-        "add_features": add_features
-    }
+    return df
 
 prep = None
 try:
-    prep = build_training_tables(raw)
+    pobj = artifacts.get("prep_objects")
+    if pobj is None:
+        raise RuntimeError(
+            "preprocessing_objects.pkl is missing. This file stores the exact "
+            "fitted OneHotEncoder/StandardScaler and lookup tables from training "
+            "and is required for correct predictions."
+        )
+
+    prep = {
+        "df": build_display_data(raw),
+        "ohe": pobj["ohe"],
+        "scaler": pobj["scaler"],
+        "numeric_features": pobj["numeric_features"],
+        "categorical_features": pobj["categorical_features"],
+        "user_avg_lookup": pobj["user_avg_lookup"],
+        "attr_avg_lookup": pobj["attr_avg_lookup"],
+        "user_visit_count": pobj["user_visit_count"],
+        "attraction_popularity": pobj["attraction_popularity"],
+        "user_mode_probs": pobj["user_mode_probs"],
+        "global_probs": pobj["global_probs"],
+        # Weighted fallbacks for users/attractions with no training history.
+        "global_user_avg": float(
+            np.average(pobj["user_avg_lookup"], weights=pobj["user_visit_count"])
+        ),
+        "global_attr_avg": float(pobj["attr_avg_lookup"].mean()),
+    }
 except Exception as e:
     prep_error = str(e)
 
 def make_prediction_row(user_id, attraction_id, year, month):
-    t = prep["train"]
     df = prep["df"]
+    NUMERIC = prep["numeric_features"]
+    CATEGORICAL = prep["categorical_features"]
 
     user_rows = df[df["UserId"] == user_id]
     attr_rows = df[df["AttractionId"] == attraction_id]
@@ -229,9 +160,7 @@ def make_prediction_row(user_id, attraction_id, year, month):
         "UserId": user_id,
         "VisitYear": int(year),
         "VisitMonth": int(month),
-        "VisitMode": np.nan,
         "AttractionId": attraction_id,
-        "Rating": np.nan,
         "Country": u.get("Country", "Unknown"),
         "Region": u.get("Region", "Unknown"),
         "Continent": u.get("Continent", "Unknown"),
@@ -240,17 +169,13 @@ def make_prediction_row(user_id, attraction_id, year, month):
 
     x = pd.DataFrame([row])
 
-    # Reproduce train-only engineered statistics.
-    x["User_Avg_Rating"] = x["UserId"].map(
-        prep["user_sum"] / prep["user_cnt"]
-    ).fillna(prep["global_mean"])
-    x["Attraction_Avg_Rating"] = x["AttractionId"].map(
-        prep["attr_sum"] / prep["attr_cnt"]
-    ).fillna(prep["global_mean"])
-    x["User_Visit_Count"] = x["UserId"].map(prep["user_cnt"]).fillna(0.0)
-    x["Attraction_Popularity"] = (
-        x["AttractionId"].map(prep["attr_cnt"]).fillna(0.0) / prep["max_attr"]
-    )
+    # Exact training-time lookups (loaded from preprocessing_objects.pkl),
+    # not re-derived statistics — this keeps app-time features on the same
+    # scale the scaler/model were actually fit on.
+    x["User_Avg_Rating"] = x["UserId"].map(prep["user_avg_lookup"]).fillna(prep["global_user_avg"])
+    x["Attraction_Avg_Rating"] = x["AttractionId"].map(prep["attr_avg_lookup"]).fillna(prep["global_attr_avg"])
+    x["User_Visit_Count"] = x["UserId"].map(prep["user_visit_count"]).fillna(0.0)
+    x["Attraction_Popularity"] = x["AttractionId"].map(prep["attraction_popularity"]).fillna(0.0)
     x["Log_User_Visits"] = np.log1p(x["User_Visit_Count"])
     x["Log_Attraction_Popularity"] = np.log1p(x["Attraction_Popularity"])
     x["VisitQuarter"] = ((x["VisitMonth"] - 1) // 3 + 1).astype(int)
@@ -280,10 +205,10 @@ def make_prediction_row(user_id, attraction_id, year, month):
     clf_model = artifacts["clf"]
     clf_base = base.copy()
 
-    if user_id in prep["mode_probs"].index:
-        probs = prep["mode_probs"].loc[user_id].to_numpy(dtype=float)
+    if user_id in prep["user_mode_probs"].index:
+        probs = prep["user_mode_probs"].loc[user_id].reindex(MODE_LABELS, fill_value=0.0).to_numpy(dtype=float)
     else:
-        probs = prep["global_probs"].to_numpy(dtype=float)
+        probs = prep["global_probs"].reindex(MODE_LABELS, fill_value=0.0).to_numpy(dtype=float)
 
     for label, prob in zip(MODE_LABELS, probs):
         clf_base["User_Mode_Prob_" + label] = prob
