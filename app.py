@@ -27,25 +27,37 @@ FILES = {
     "prep_objects": "preprocessing_objects.pkl",
 }
 
+def find_file(filename):
+    """Look for filename directly next to app.py first; if not found there,
+    search one level of subdirectories too (handles repos that keep the
+    .pkl artifacts inside a data/ or similar subfolder)."""
+    direct = os.path.join(BASE_DIR, filename)
+    if os.path.exists(direct):
+        return direct
+    for root, _dirs, files in os.walk(BASE_DIR):
+        if filename in files:
+            return os.path.join(root, filename)
+    return None
+
 def p(name):
-    return os.path.join(BASE_DIR, FILES[name])
+    return find_file(FILES[name])
 
 @st.cache_resource
 def load_artifacts():
     out, errors = {}, []
     for key, fn in FILES.items():
         fp = p(key)
-        if not os.path.exists(fp):
-            errors.append(f"{fn} not found")
+        if fp is None:
+            errors.append(f"{fn}: not found anywhere under {BASE_DIR}")
             continue
         try:
             out[key] = joblib.load(fp)
-        except Exception:
+        except Exception as e1:
             try:
                 with open(fp, "rb") as f:
                     out[key] = pickle.load(f)
-            except Exception as e:
-                errors.append(f"{fn}: {e}")
+            except Exception as e2:
+                errors.append(f"{fn}: joblib error: {e1!r} | pickle error: {e2!r}")
     return out, errors
 
 artifacts, load_errors = load_artifacts()
@@ -112,11 +124,12 @@ prep = None
 try:
     pobj = artifacts.get("prep_objects")
     if pobj is None:
-        raise RuntimeError(
-            "preprocessing_objects.pkl is missing. This file stores the exact "
-            "fitted OneHotEncoder/StandardScaler and lookup tables from training "
-            "and is required for correct predictions."
+        detail = next(
+            (e for e in load_errors if "preprocessing_objects.pkl" in e),
+            "no specific error was captured — check the 'Artifact details' "
+            "expander in the sidebar for the full list of load errors."
         )
+        raise RuntimeError(f"preprocessing_objects.pkl could not be loaded: {detail}")
 
     prep = {
         "df": build_display_data(raw),
@@ -292,7 +305,7 @@ st.sidebar.markdown("---")
 st.sidebar.caption("Built by Devadharshini")
 
 if load_errors:
-    with st.sidebar.expander("Artifact details"):
+    with st.sidebar.expander("Artifact details", expanded=True):
         for e in load_errors:
             st.write("•", e)
 
