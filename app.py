@@ -120,6 +120,92 @@ def build_display_data(raw):
     df = df.merge(typ, on="AttractionTypeId", how="left")
     return df
 
+@st.cache_data
+def compute_dataset_insights(raw):
+    """Purely descriptive analytics computed from the FULL raw dataset (every
+    transaction, not just the training split used by the models). This is
+    used ONLY to show extra context/charts to the app user — it is never
+    used as model input and does not touch build_display_data, prep, or
+    make_prediction_row in any way."""
+    tx = raw["Transaction.xlsx"].copy()
+    user = raw["User.xlsx"].copy()
+    city = raw["City.xlsx"].copy()
+    country = raw["Country.xlsx"].copy()
+    region = raw["Region.xlsx"].copy()
+    continent = raw["Continent.xlsx"].copy()
+    typ = raw["Type.xlsx"].copy()
+    item = raw["Updated_Item.xlsx"].copy()
+    mode = raw.get("Mode.xlsx")
+
+    df = tx.merge(user, on="UserId", how="left")
+    df = df.merge(city, on="CityId", how="left", suffixes=("", "_city"))
+    df = df.merge(country, on="CountryId", how="left", suffixes=("", "_country"))
+    df = df.merge(region, on="RegionId", how="left", suffixes=("", "_region"))
+    df = df.merge(continent, on="ContinentId", how="left", suffixes=("", "_cont"))
+    df = df.merge(item, on="AttractionId", how="left")
+    df = df.merge(typ, on="AttractionTypeId", how="left")
+
+    if mode is not None:
+        mode_map = mode.rename(columns={"VisitMode": "VisitModeName"})
+        df = df.merge(
+            mode_map[["VisitModeId", "VisitModeName"]],
+            left_on="VisitMode", right_on="VisitModeId", how="left"
+        )
+    else:
+        fallback = {1: "Business", 2: "Couples", 3: "Family", 4: "Friends", 5: "Solo"}
+        df["VisitModeName"] = df["VisitMode"].map(fallback)
+
+    visit_mode_counts = (
+        df["VisitModeName"].value_counts()
+        .rename_axis("VisitMode").reset_index(name="Count")
+    )
+
+    rating_counts = (
+        tx["Rating"].value_counts().sort_index()
+        .rename_axis("Rating").reset_index(name="Count")
+    )
+
+    top_attractions = (
+        df.groupby(["Attraction", "AttractionType"])
+        .agg(VisitCount=("TransactionId", "count"), AvgRating=("Rating", "mean"))
+        .reset_index()
+        .sort_values("VisitCount", ascending=False)
+        .head(10)
+    )
+
+    attraction_type_counts = (
+        df.groupby("AttractionType")
+        .agg(VisitCount=("TransactionId", "count"))
+        .reset_index()
+        .sort_values("VisitCount", ascending=False)
+    )
+
+    continent_counts = (
+        df.drop_duplicates("UserId")["Continent"]
+        .value_counts().rename_axis("Continent").reset_index(name="Users")
+    )
+
+    monthly_counts = (
+        df.groupby("VisitMonth").size()
+        .reindex(range(1, 13), fill_value=0)
+        .rename_axis("Month").reset_index(name="Visits")
+    )
+
+    return {
+        "df": df,
+        "total_transactions": int(len(tx)),
+        "total_users": int(df["UserId"].nunique()),
+        "total_attractions_used": int(df["AttractionId"].nunique()),
+        "total_attractions_catalog": int(item["AttractionId"].nunique()),
+        "avg_rating": float(tx["Rating"].mean()),
+        "visit_mode_counts": visit_mode_counts,
+        "rating_counts": rating_counts,
+        "top_attractions": top_attractions,
+        "attraction_type_counts": attraction_type_counts,
+        "continent_counts": continent_counts,
+        "monthly_counts": monthly_counts,
+    }
+
 prep = None
 try:
     pobj = artifacts.get("prep_objects")
@@ -151,6 +237,15 @@ try:
     }
 except Exception as e:
     prep_error = str(e)
+
+# Separate, non-critical load: descriptive dataset insights for extra context
+# shown to the user. Wrapped independently so a failure here can NEVER break
+# the prediction pages above.
+insights = None
+try:
+    insights = compute_dataset_insights(raw)
+except Exception as e:
+    insights_error = str(e)
 
 def make_prediction_row(user_id, attraction_id, year, month):
     df = prep["df"]
@@ -276,6 +371,44 @@ def get_recommendations(attraction_name, top_n):
     return out[cols]
 
 # ------------------------------------------------------------
+# Descriptive context helpers (for extra info shown to the user only —
+# these are never used as model input and never touch make_prediction_row
+# or get_recommendations above).
+# ------------------------------------------------------------
+def user_history_snapshot(insights, user_id):
+    if insights is None:
+        return None
+    d = insights["df"]
+    rows = d[d["UserId"] == user_id]
+    if rows.empty:
+        return None
+    u0 = rows.iloc[0]
+    return {
+        "country": u0.get("Country", "Unknown"),
+        "region": u0.get("Region", "Unknown"),
+        "continent": u0.get("Continent", "Unknown"),
+        "visit_count": int(len(rows)),
+        "avg_rating": float(rows["Rating"].mean()),
+        "mode_counts": rows["VisitModeName"].value_counts(),
+    }
+
+def attraction_snapshot(insights, attraction_id):
+    if insights is None:
+        return None
+    d = insights["df"]
+    rows = d[d["AttractionId"] == attraction_id]
+    if rows.empty:
+        return None
+    a0 = rows.iloc[0]
+    return {
+        "type": a0.get("AttractionType", "Unknown"),
+        "address": a0.get("AttractionAddress", "Unknown"),
+        "visit_count": int(len(rows)),
+        "avg_rating": float(rows["Rating"].mean()),
+        "mode_counts": rows["VisitModeName"].value_counts(),
+    }
+
+# ------------------------------------------------------------
 # Styling
 # ------------------------------------------------------------
 st.markdown("""
@@ -293,14 +426,58 @@ st.markdown("""
     border: 1px solid rgba(128,128,128,.25);
     background: rgba(128,128,128,.05);
 }
+.snapshot-card {
+    padding: 0.9rem 1.1rem;
+    border-radius: 14px;
+    border: 1px solid rgba(128,128,128,.25);
+    background: rgba(59,130,246,.06);
+    margin-bottom: 0.6rem;
+}
+/* ---- Sidebar navigation styling ---- */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+}
+section[data-testid="stSidebar"] .stRadio > div {
+    gap: 0.45rem;
+}
+section[data-testid="stSidebar"] .stRadio > div > label {
+    padding: 0.65rem 1rem;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    transition: all .15s ease-in-out;
+}
+section[data-testid="stSidebar"] .stRadio > div > label:hover {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(251,191,36,0.4);
+}
+section[data-testid="stSidebar"] .stRadio > div > label > div:first-child {
+    display: none;
+}
+.sidebar-stat {
+    font-size: 0.82rem;
+    opacity: 0.85;
+    margin: 0.15rem 0;
+}
 </style>
 """, unsafe_allow_html=True)
 
-st.sidebar.title("🌍 Tourism Analytics")
+st.sidebar.markdown("### 🌍 Tourism Analytics")
+st.sidebar.caption("Explore, predict & get recommendations")
 page = st.sidebar.radio(
     "Navigate",
-    ["🏠 Home", "🎯 Classification", "⭐ Regression", "🧭 Recommendation"]
+    ["🏠 Home", "🎯 Classification", "⭐ Regression", "🧭 Recommendation"],
+    label_visibility="collapsed"
 )
+
+if insights is not None:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**📌 Quick stats**")
+    st.sidebar.markdown(f'<div class="sidebar-stat">📝 {insights["total_transactions"]:,} transactions</div>', unsafe_allow_html=True)
+    st.sidebar.markdown(f'<div class="sidebar-stat">👥 {insights["total_users"]:,} users</div>', unsafe_allow_html=True)
+    st.sidebar.markdown(f'<div class="sidebar-stat">📍 {insights["total_attractions_used"]} attractions with visit data</div>', unsafe_allow_html=True)
+    st.sidebar.markdown(f'<div class="sidebar-stat">⭐ {insights["avg_rating"]:.2f} average rating</div>', unsafe_allow_html=True)
+
 st.sidebar.markdown("---")
 st.sidebar.caption("Built by Devadharshini")
 
@@ -331,11 +508,23 @@ if page == "🏠 Home":
         "engineering, machine learning and attraction recommendation."
     )
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Transactions", "52,930")
-    c2.metric("Users", "33,530")
-    c3.metric("Attractions", "1,698")
-    c4.metric("Visit Modes", "5")
+    if insights is not None:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Transactions", f'{insights["total_transactions"]:,}')
+        c2.metric("Users", f'{insights["total_users"]:,}')
+        c3.metric(
+            "Attractions",
+            f'{insights["total_attractions_used"]}',
+            help=f'{insights["total_attractions_catalog"]:,} total in the attraction catalog; '
+                 f'{insights["total_attractions_used"]} have recorded visits.'
+        )
+        c4.metric("Avg. Rating", f'{insights["avg_rating"]:.2f} / 5')
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Transactions", "52,930")
+        c2.metric("Users", "33,530")
+        c3.metric("Attractions", "1,698")
+        c4.metric("Visit Modes", "5")
 
     st.markdown("### 🔬 Application Modules")
     a, b, c = st.columns(3)
@@ -348,6 +537,78 @@ if page == "🏠 Home":
     with c:
         st.markdown("#### 🧭 Recommendation")
         st.write("Ranks similar attractions using content similarity and popularity.")
+
+    with st.expander("ℹ️ What does each visit mode mean?"):
+        st.markdown(
+            "- **Business** — work-related travel\n"
+            "- **Couples** — traveling as a pair/romantic trip\n"
+            "- **Family** — traveling with family members, often including children\n"
+            "- **Friends** — traveling in a group of friends\n"
+            "- **Solo** — traveling alone"
+        )
+
+    if insights is not None:
+        st.markdown("---")
+        st.markdown("### 📊 Dataset Insights")
+
+        d1, d2 = st.columns(2)
+        with d1:
+            fig = px.bar(
+                insights["top_attractions"].sort_values("VisitCount"),
+                x="VisitCount", y="Attraction", orientation="h",
+                color="AvgRating", color_continuous_scale="Blues",
+                title="Top 10 Most-Visited Attractions",
+                labels={"VisitCount": "Visits", "AvgRating": "Avg Rating"}
+            )
+            fig.update_layout(height=420)
+            st.plotly_chart(fig, use_container_width=True)
+        with d2:
+            fig = px.pie(
+                insights["visit_mode_counts"], names="VisitMode", values="Count",
+                title="Visit Mode Share", hole=0.45
+            )
+            fig.update_layout(height=420)
+            st.plotly_chart(fig, use_container_width=True)
+
+        d3, d4 = st.columns(2)
+        with d3:
+            fig = px.bar(
+                insights["rating_counts"], x="Rating", y="Count",
+                title="Rating Distribution (all transactions)",
+                text="Count"
+            )
+            fig.update_xaxes(dtick=1)
+            st.plotly_chart(fig, use_container_width=True)
+        with d4:
+            fig = px.bar(
+                insights["continent_counts"].sort_values("Users"),
+                x="Users", y="Continent", orientation="h",
+                title="Users by Continent"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("#### 📅 Visits by Month (seasonality)")
+        fig = px.line(
+            insights["monthly_counts"], x="Month", y="Visits", markers=True,
+            title="Total Visits per Month (across all years)"
+        )
+        fig.update_xaxes(dtick=1)
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("#### 🏛️ Popularity by Attraction Type")
+        fig = px.bar(
+            insights["attraction_type_counts"],
+            x="AttractionType", y="VisitCount",
+            title="Visit Volume by Attraction Type"
+        )
+        fig.update_xaxes(tickangle=-30)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.markdown("---")
+        st.info(
+            "Dataset insights are unavailable right now"
+            + (f": {insights_error}" if "insights_error" in globals() else ".")
+        )
 
     st.markdown("---")
     st.info(
@@ -387,6 +648,44 @@ elif page == "🎯 Classification":
         selected_attr = st.selectbox("Attraction", attr_names, index=attr_index)
         month = st.slider("Visit Month", 1, 12, 12)
 
+    with st.expander("📋 User & attraction snapshot", expanded=False):
+        s1, s2 = st.columns(2)
+        u_snap = user_history_snapshot(insights, user_id)
+        with s1:
+            st.markdown("**User**")
+            if u_snap:
+                st.markdown(
+                    f'<div class="snapshot-card">'
+                    f'📍 {u_snap["country"]}, {u_snap["region"]}, {u_snap["continent"]}<br>'
+                    f'🧳 {u_snap["visit_count"]} past visit(s) in the dataset<br>'
+                    f'⭐ {u_snap["avg_rating"]:.2f} average rating given'
+                    f'</div>', unsafe_allow_html=True
+                )
+                if len(u_snap["mode_counts"]) > 0:
+                    st.caption("Past visit modes:")
+                    st.bar_chart(u_snap["mode_counts"])
+            else:
+                st.caption("No history available for this user.")
+        a_snap = attraction_snapshot(insights, int(
+            attrs.loc[attrs["Attraction"].astype(str) == selected_attr, "AttractionId"].iloc[0]
+        ))
+        with s2:
+            st.markdown("**Attraction**")
+            if a_snap:
+                st.markdown(
+                    f'<div class="snapshot-card">'
+                    f'🏷️ {a_snap["type"]}<br>'
+                    f'📌 {a_snap["address"]}<br>'
+                    f'🧳 {a_snap["visit_count"]} recorded visits<br>'
+                    f'⭐ {a_snap["avg_rating"]:.2f} average rating'
+                    f'</div>', unsafe_allow_html=True
+                )
+                if len(a_snap["mode_counts"]) > 0:
+                    st.caption("Who typically visits:")
+                    st.bar_chart(a_snap["mode_counts"])
+            else:
+                st.caption("No history available for this attraction.")
+
     if st.button("Predict Visit Mode", type="primary", use_container_width=True):
         try:
             attraction_id = int(attrs.loc[attrs["Attraction"].astype(str) == selected_attr, "AttractionId"].iloc[0])
@@ -407,6 +706,21 @@ elif page == "🎯 Classification":
                              title="Prediction Probability")
                 fig.update_yaxes(range=[0, 1])
                 st.plotly_chart(fig, use_container_width=True)
+
+            a_snap = attraction_snapshot(insights, attraction_id)
+            if a_snap and len(a_snap["mode_counts"]) > 0:
+                top_hist_mode = a_snap["mode_counts"].idxmax()
+                if top_hist_mode == label:
+                    st.caption(
+                        f"✅ This matches the most common historical visit mode for "
+                        f"**{selected_attr}** ({top_hist_mode})."
+                    )
+                else:
+                    st.caption(
+                        f"ℹ️ Note: the most common historical visit mode for "
+                        f"**{selected_attr}** is **{top_hist_mode}**, though the model "
+                        f"predicts **{label}** for this specific user & trip context."
+                    )
 
             st.caption(
                 f"Model input shape: {Xclf.shape[1]} features — matching the saved XGBoost model."
@@ -446,6 +760,38 @@ elif page == "⭐ Regression":
         selected_attr = st.selectbox("Attraction", attr_names, index=attr_index, key="reg_attr")
         month = st.slider("Visit Month", 1, 12, 12, key="reg_month")
 
+    with st.expander("📋 User & attraction snapshot", expanded=False):
+        s1, s2 = st.columns(2)
+        u_snap = user_history_snapshot(insights, user_id)
+        with s1:
+            st.markdown("**User**")
+            if u_snap:
+                st.markdown(
+                    f'<div class="snapshot-card">'
+                    f'📍 {u_snap["country"]}, {u_snap["region"]}, {u_snap["continent"]}<br>'
+                    f'🧳 {u_snap["visit_count"]} past visit(s) in the dataset<br>'
+                    f'⭐ {u_snap["avg_rating"]:.2f} average rating given'
+                    f'</div>', unsafe_allow_html=True
+                )
+            else:
+                st.caption("No history available for this user.")
+        a_snap = attraction_snapshot(insights, int(
+            attrs.loc[attrs["Attraction"].astype(str) == selected_attr, "AttractionId"].iloc[0]
+        ))
+        with s2:
+            st.markdown("**Attraction**")
+            if a_snap:
+                st.markdown(
+                    f'<div class="snapshot-card">'
+                    f'🏷️ {a_snap["type"]}<br>'
+                    f'📌 {a_snap["address"]}<br>'
+                    f'🧳 {a_snap["visit_count"]} recorded visits<br>'
+                    f'⭐ {a_snap["avg_rating"]:.2f} average rating'
+                    f'</div>', unsafe_allow_html=True
+                )
+            else:
+                st.caption("No history available for this attraction.")
+
     if st.button("Predict Rating", type="primary", use_container_width=True):
         try:
             attraction_id = int(attrs.loc[attrs["Attraction"].astype(str) == selected_attr, "AttractionId"].iloc[0])
@@ -455,6 +801,34 @@ elif page == "⭐ Regression":
 
             st.success(f"### Predicted Rating: {pred:.2f} / 5")
             st.progress(pred / 5)
+
+            a_snap = attraction_snapshot(insights, attraction_id)
+            if insights is not None and a_snap:
+                compare_df = pd.DataFrame({
+                    "Metric": ["Predicted Rating", f"{selected_attr}'s Historical Avg", "Overall Dataset Avg"],
+                    "Rating": [pred, a_snap["avg_rating"], insights["avg_rating"]]
+                })
+                fig = px.bar(
+                    compare_df, x="Metric", y="Rating", color="Metric",
+                    title="Predicted Rating vs Historical Averages",
+                    range_y=[0, 5]
+                )
+                fig.update_layout(showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+
+                attr_ratings = insights["df"].loc[
+                    insights["df"]["AttractionId"] == attraction_id, "Rating"
+                ]
+                if len(attr_ratings) >= 5:
+                    fig2 = px.histogram(
+                        attr_ratings, nbins=5,
+                        title=f"Historical Rating Distribution — {selected_attr}",
+                        labels={"value": "Rating"}
+                    )
+                    fig2.add_vline(x=pred, line_dash="dash", line_color="orange",
+                                    annotation_text="Predicted")
+                    fig2.update_layout(showlegend=False)
+                    st.plotly_chart(fig2, use_container_width=True)
         except Exception as e:
             st.error(f"Prediction failed: {e}")
 
@@ -477,11 +851,33 @@ elif page == "🧭 Recommendation":
     selected_attr = st.selectbox("Choose an attraction", names, index=default_idx)
     top_n = st.slider("Number of recommendations", 3, min(10, max(3, len(names)-1)), 7)
 
+    sel_row = rec[rec["Attraction"].astype(str) == selected_attr]
+    if not sel_row.empty:
+        r0 = sel_row.iloc[0]
+        st.markdown(
+            f'<div class="snapshot-card">'
+            f'🏷️ {r0.get("AttractionType","Unknown")} &nbsp;|&nbsp; '
+            f'📍 {r0.get("CityName","Unknown")}, {r0.get("Country","Unknown")} &nbsp;|&nbsp; '
+            f'🧳 {int(r0.get("VisitCount",0)):,} visits &nbsp;|&nbsp; '
+            f'🔥 popularity score {float(r0.get("PopularityScore",0)):.2f}'
+            f'</div>', unsafe_allow_html=True
+        )
+
     if st.button("Recommend Attractions", type="primary", use_container_width=True):
         try:
             result = get_recommendations(selected_attr, top_n)
             st.success(f"### Top {len(result)} recommendations for {selected_attr}")
             st.dataframe(result, use_container_width=True, hide_index=True)
+
+            if "AttractionType" in result.columns and len(result) > 0:
+                type_counts = result["AttractionType"].value_counts().reset_index()
+                type_counts.columns = ["AttractionType", "Count"]
+                fig = px.bar(
+                    type_counts, x="AttractionType", y="Count",
+                    title="Attraction Types Among These Recommendations"
+                )
+                fig.update_xaxes(tickangle=-20)
+                st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.error(f"Recommendation failed: {e}")
 
