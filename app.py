@@ -442,33 +442,36 @@ st.markdown("""
 .hero {
     padding: 2rem;
     border-radius: 20px;
-    background: linear-gradient(135deg, #0b1220, #1e3a8a);
+    background: linear-gradient(135deg, #38bdf8, #0284c7);
     color: white;
+    border: 3px solid #f5b301;
     margin-bottom: 1.5rem;
 }
 .card {
     padding: 1rem;
     border-radius: 15px;
-    border: 1px solid rgba(59,130,246,.25);
-    background: rgba(59,130,246,.06);
+    border: 1px solid rgba(2,132,199,.3);
+    background: rgba(56,189,248,.10);
 }
 .snapshot-card {
     padding: 0.9rem 1.1rem;
     border-radius: 14px;
-    border: 1px solid rgba(59,130,246,.3);
-    background: rgba(37,99,235,.10);
+    border: 1px solid rgba(2,132,199,.3);
+    background: rgba(191,232,255,.55);
+    color: #0b3556;
     margin-bottom: 0.6rem;
 }
 .also-like-card {
     padding: 0.8rem 1rem;
     border-radius: 14px;
-    border: 1px solid rgba(59,130,246,.3);
-    background: rgba(37,99,235,.08);
+    border: 1px solid rgba(245,179,1,.5);
+    background: rgba(245,179,1,.12);
+    color: #0b3556;
     margin-bottom: 0.5rem;
 }
 /* ---- Sidebar navigation styling ---- */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0b1220 0%, #101a30 100%);
+    background: linear-gradient(180deg, #bfe8ff 0%, #8fd3ff 100%);
 }
 section[data-testid="stSidebar"] .stRadio > div {
     gap: 0.45rem;
@@ -476,13 +479,13 @@ section[data-testid="stSidebar"] .stRadio > div {
 section[data-testid="stSidebar"] .stRadio > div > label {
     padding: 0.65rem 1rem;
     border-radius: 12px;
-    background: rgba(37,99,235,0.08);
-    border: 1px solid rgba(37,99,235,0.18);
+    background: rgba(255,255,255,0.5);
+    border: 1px solid rgba(2,132,199,0.25);
     transition: all .15s ease-in-out;
 }
 section[data-testid="stSidebar"] .stRadio > div > label:hover {
-    background: rgba(37,99,235,0.22);
-    border-color: rgba(96,165,250,0.5);
+    background: rgba(245,179,1,0.35);
+    border-color: rgba(245,179,1,0.7);
 }
 section[data-testid="stSidebar"] .stRadio > div > label > div:first-child {
     display: none;
@@ -491,6 +494,7 @@ section[data-testid="stSidebar"] .stRadio > div > label > div:first-child {
     font-size: 0.82rem;
     opacity: 0.9;
     margin: 0.15rem 0;
+    color: #0b3556;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -499,7 +503,8 @@ st.sidebar.markdown("### 🌍 Tourism Analytics")
 st.sidebar.caption("Explore, predict & get recommendations")
 page = st.sidebar.radio(
     "Navigate",
-    ["🏠 Home", "🎯 Classification", "⭐ Regression", "🧭 Recommendation"],
+    ["🏠 Home", "🎯 Visitor Mode Prediction", "⭐ Attraction Rating Prediction",
+     "🧭 Recommendation", "🥥 Explore Insights"],
     label_visibility="collapsed"
 )
 
@@ -530,7 +535,7 @@ if page == "🏠 Home":
     st.markdown("""
     <div class="hero">
         <h1>🌍 Tourism Experience Analytics</h1>
-        <p>Classification • Rating Prediction • Attraction Recommendation</p>
+        <p>Visitor Mode Prediction • Attraction Rating Prediction • Recommendation • Explore Insights</p>
         <p><b>Built by Devadharshini</b></p>
     </div>
     """, unsafe_allow_html=True)
@@ -562,10 +567,10 @@ if page == "🏠 Home":
     st.markdown("### 🔬 Application Modules")
     a, b, c = st.columns(3)
     with a:
-        st.markdown("#### 🎯 Classification")
+        st.markdown("#### 🎯 Visitor Mode Prediction")
         st.write("Predicts Business, Couples, Family, Friends or Solo visit mode.")
     with b:
-        st.markdown("#### ⭐ Regression")
+        st.markdown("#### ⭐ Attraction Rating Prediction")
         st.write("Predicts an expected attraction rating on a 1–5 scale.")
     with c:
         st.markdown("#### 🧭 Recommendation")
@@ -582,60 +587,9 @@ if page == "🏠 Home":
 
     if insights is not None:
         st.markdown("---")
-        st.markdown("### 📊 Dataset Insights")
-
-        d1, d2 = st.columns(2)
-        with d1:
-            fig = px.bar(
-                insights["top_attractions"].sort_values("VisitCount"),
-                x="VisitCount", y="Attraction", orientation="h",
-                color="AvgRating", color_continuous_scale="Blues",
-                title="Top 10 Most-Visited Attractions",
-                labels={"VisitCount": "Visits", "AvgRating": "Avg Rating"}
-            )
-            fig.update_layout(height=420)
-            st.plotly_chart(fig, use_container_width=True)
-        with d2:
-            fig = px.pie(
-                insights["visit_mode_counts"], names="VisitMode", values="Count",
-                title="Visit Mode Share", hole=0.45
-            )
-            fig.update_layout(height=420)
-            st.plotly_chart(fig, use_container_width=True)
-
-        d3, d4 = st.columns(2)
-        with d3:
-            fig = px.bar(
-                insights["rating_counts"], x="Rating", y="Count",
-                title="Rating Distribution (all transactions)",
-                text="Count"
-            )
-            fig.update_xaxes(dtick=1)
-            st.plotly_chart(fig, use_container_width=True)
-        with d4:
-            fig = px.bar(
-                insights["continent_counts"].sort_values("Users"),
-                x="Users", y="Continent", orientation="h",
-                title="Users by Continent"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-        st.markdown("#### 📅 Visits by Month (seasonality)")
-        fig = px.line(
-            insights["monthly_counts"], x="Month", y="Visits", markers=True,
-            title="Total Visits per Month (across all years)"
-        )
-        fig.update_xaxes(dtick=1)
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.markdown("#### 🏛️ Popularity by Attraction Type")
-        fig = px.bar(
-            insights["attraction_type_counts"],
-            x="AttractionType", y="VisitCount",
-            title="Visit Volume by Attraction Type"
-        )
-        fig.update_xaxes(tickangle=-30)
-        st.plotly_chart(fig, use_container_width=True)
+        st.info("📊 Want the full charts — top attractions, rating distribution, "
+                "seasonality, and an attraction-by-attraction explorer? Head to "
+                "**🥥 Explore Insights** in the sidebar.")
     else:
         st.markdown("---")
         st.info(
@@ -652,7 +606,7 @@ if page == "🏠 Home":
 # ============================================================
 # CLASSIFICATION
 # ============================================================
-elif page == "🎯 Classification":
+elif page == "🎯 Visitor Mode Prediction":
     st.title("🎯 Visitor Mode Prediction")
     st.write("Enter a visitor and trip context to predict the likely visit mode.")
 
@@ -766,7 +720,7 @@ elif page == "🎯 Classification":
 # ============================================================
 # REGRESSION
 # ============================================================
-elif page == "⭐ Regression":
+elif page == "⭐ Attraction Rating Prediction":
     st.title("⭐ Attraction Rating Prediction")
     st.write("Estimate the expected attraction rating on a 1–5 scale.")
 
@@ -917,6 +871,117 @@ elif page == "🧭 Recommendation":
                 st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.error(f"Recommendation failed: {e}")
+
+# ============================================================
+# EXPLORE INSIGHTS
+# ============================================================
+elif page == "🥥 Explore Insights":
+    st.title("🥥 Explore Insights")
+    st.write(
+        "Browse the full dataset before making a prediction — see what's "
+        "popular, how ratings and visit modes break down, and dig into any "
+        "single attraction's history."
+    )
+
+    if insights is None:
+        st.info(
+            "Dataset insights are unavailable right now"
+            + (f": {insights_error}" if "insights_error" in globals() else ".")
+        )
+        st.stop()
+
+    st.markdown("### 📊 Dataset-wide charts")
+    d1, d2 = st.columns(2)
+    with d1:
+        fig = px.bar(
+            insights["top_attractions"].sort_values("VisitCount"),
+            x="VisitCount", y="Attraction", orientation="h",
+            color="AvgRating", color_continuous_scale="Blues",
+            title="Top 10 Most-Visited Attractions",
+            labels={"VisitCount": "Visits", "AvgRating": "Avg Rating"}
+        )
+        fig.update_layout(height=420)
+        st.plotly_chart(fig, use_container_width=True)
+    with d2:
+        fig = px.pie(
+            insights["visit_mode_counts"], names="VisitMode", values="Count",
+            title="Visit Mode Share", hole=0.45
+        )
+        fig.update_layout(height=420)
+        st.plotly_chart(fig, use_container_width=True)
+
+    d3, d4 = st.columns(2)
+    with d3:
+        fig = px.bar(
+            insights["rating_counts"], x="Rating", y="Count",
+            title="Rating Distribution (all transactions)",
+            text="Count"
+        )
+        fig.update_xaxes(dtick=1)
+        st.plotly_chart(fig, use_container_width=True)
+    with d4:
+        fig = px.bar(
+            insights["continent_counts"].sort_values("Users"),
+            x="Users", y="Continent", orientation="h",
+            title="Users by Continent"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("#### 📅 Visits by Month (seasonality)")
+    fig = px.line(
+        insights["monthly_counts"], x="Month", y="Visits", markers=True,
+        title="Total Visits per Month (across all years)"
+    )
+    fig.update_xaxes(dtick=1)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("#### 🏛️ Popularity by Attraction Type")
+    fig = px.bar(
+        insights["attraction_type_counts"],
+        x="AttractionType", y="VisitCount",
+        title="Visit Volume by Attraction Type"
+    )
+    fig.update_xaxes(tickangle=-30)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("### 🔎 Attraction Explorer")
+    st.write(
+        "Pick any attraction to see its full profile — useful for deciding "
+        "what to enter on the prediction or recommendation pages."
+    )
+
+    attr_options = sorted(insights["df"]["Attraction"].dropna().unique().tolist())
+    picked = st.selectbox("Choose an attraction to explore", attr_options)
+
+    picked_id = int(
+        insights["df"].loc[insights["df"]["Attraction"] == picked, "AttractionId"].iloc[0]
+    )
+    snap = attraction_snapshot(insights, picked_id)
+    if snap:
+        e1, e2 = st.columns([1, 1])
+        with e1:
+            st.markdown(
+                f'<div class="snapshot-card">'
+                f'🏷️ {snap["type"]}<br>'
+                f'📌 {snap["address"]}<br>'
+                f'🧳 {snap["visit_count"]:,} recorded visits<br>'
+                f'⭐ {snap["avg_rating"]:.2f} average rating'
+                f'</div>', unsafe_allow_html=True
+            )
+            if len(snap["mode_counts"]) > 0:
+                st.caption("Who typically visits:")
+                st.bar_chart(snap["mode_counts"])
+        with e2:
+            st.caption("🔗 Similar attractions (from the Recommendation model):")
+            try:
+                similar = get_recommendations(picked, 5)
+                st.dataframe(
+                    similar[["Attraction", "AttractionType", "HybridScore"]],
+                    use_container_width=True, hide_index=True
+                )
+            except Exception:
+                st.caption("No recommendation data available for this attraction.")
 
 st.markdown("---")
 st.caption("Tourism Experience Analytics • Built by Devadharshini")
