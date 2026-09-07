@@ -408,6 +408,32 @@ def attraction_snapshot(insights, attraction_id):
         "mode_counts": rows["VisitModeName"].value_counts(),
     }
 
+def show_also_like(attraction_name, n=3):
+    """Cross-feature add-on for the Classification/Regression pages: reuses
+    the existing, unmodified get_recommendations() to surface similar
+    attractions right after a prediction. Purely additive display —
+    does not change get_recommendations() or any prediction logic."""
+    rec = artifacts.get("rec_data")
+    if rec is None or attraction_name not in rec["Attraction"].astype(str).tolist():
+        return
+    try:
+        similar = get_recommendations(attraction_name, n)
+    except Exception:
+        return
+    if similar.empty:
+        return
+    st.markdown("#### 🔗 You might also like")
+    cols = st.columns(len(similar))
+    for col, (_, row) in zip(cols, similar.iterrows()):
+        with col:
+            st.markdown(
+                f'<div class="also-like-card">'
+                f'<b>{row["Attraction"]}</b><br>'
+                f'🏷️ {row.get("AttractionType","")}<br>'
+                f'🔥 match {row["HybridScore"]:.2f}'
+                f'</div>', unsafe_allow_html=True
+            )
+
 # ------------------------------------------------------------
 # Styling
 # ------------------------------------------------------------
@@ -416,26 +442,33 @@ st.markdown("""
 .hero {
     padding: 2rem;
     border-radius: 20px;
-    background: linear-gradient(135deg, #0f172a, #1e3a5f);
+    background: linear-gradient(135deg, #0b1220, #1e3a8a);
     color: white;
     margin-bottom: 1.5rem;
 }
 .card {
     padding: 1rem;
     border-radius: 15px;
-    border: 1px solid rgba(128,128,128,.25);
-    background: rgba(128,128,128,.05);
+    border: 1px solid rgba(59,130,246,.25);
+    background: rgba(59,130,246,.06);
 }
 .snapshot-card {
     padding: 0.9rem 1.1rem;
     border-radius: 14px;
-    border: 1px solid rgba(128,128,128,.25);
-    background: rgba(59,130,246,.06);
+    border: 1px solid rgba(59,130,246,.3);
+    background: rgba(37,99,235,.10);
     margin-bottom: 0.6rem;
+}
+.also-like-card {
+    padding: 0.8rem 1rem;
+    border-radius: 14px;
+    border: 1px solid rgba(59,130,246,.3);
+    background: rgba(37,99,235,.08);
+    margin-bottom: 0.5rem;
 }
 /* ---- Sidebar navigation styling ---- */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+    background: linear-gradient(180deg, #0b1220 0%, #101a30 100%);
 }
 section[data-testid="stSidebar"] .stRadio > div {
     gap: 0.45rem;
@@ -443,20 +476,20 @@ section[data-testid="stSidebar"] .stRadio > div {
 section[data-testid="stSidebar"] .stRadio > div > label {
     padding: 0.65rem 1rem;
     border-radius: 12px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(37,99,235,0.08);
+    border: 1px solid rgba(37,99,235,0.18);
     transition: all .15s ease-in-out;
 }
 section[data-testid="stSidebar"] .stRadio > div > label:hover {
-    background: rgba(255,255,255,0.12);
-    border-color: rgba(251,191,36,0.4);
+    background: rgba(37,99,235,0.22);
+    border-color: rgba(96,165,250,0.5);
 }
 section[data-testid="stSidebar"] .stRadio > div > label > div:first-child {
     display: none;
 }
 .sidebar-stat {
     font-size: 0.82rem;
-    opacity: 0.85;
+    opacity: 0.9;
     margin: 0.15rem 0;
 }
 </style>
@@ -725,6 +758,8 @@ elif page == "🎯 Classification":
             st.caption(
                 f"Model input shape: {Xclf.shape[1]} features — matching the saved XGBoost model."
             )
+
+            show_also_like(selected_attr)
         except Exception as e:
             st.error(f"Prediction failed: {e}")
 
@@ -829,6 +864,8 @@ elif page == "⭐ Regression":
                                     annotation_text="Predicted")
                     fig2.update_layout(showlegend=False)
                     st.plotly_chart(fig2, use_container_width=True)
+
+            show_also_like(selected_attr)
         except Exception as e:
             st.error(f"Prediction failed: {e}")
 
