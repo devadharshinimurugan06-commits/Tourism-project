@@ -649,43 +649,25 @@ elif page == "🎯 Visitor Mode Prediction":
         selected_attr = st.selectbox("Attraction", attr_names, index=attr_index)
         month = st.slider("Visit Month", 1, 12, 12)
 
-    with st.expander("📋 User & attraction snapshot", expanded=False):
-        s1, s2 = st.columns(2)
-        u_snap = user_history_snapshot(insights, user_id)
-        with s1:
-            st.markdown("**User**")
-            if u_snap:
-                st.markdown(
-                    f'<div class="snapshot-card">'
-                    f'📍 {u_snap["country"]}, {u_snap["region"]}, {u_snap["continent"]}<br>'
-                    f'🧳 {u_snap["visit_count"]} past visit(s) in the dataset<br>'
-                    f'⭐ {u_snap["avg_rating"]:.2f} average rating given'
-                    f'</div>', unsafe_allow_html=True
-                )
-                if len(u_snap["mode_counts"]) > 0:
-                    st.caption("Past visit modes:")
-                    st.bar_chart(u_snap["mode_counts"])
-            else:
-                st.caption("No history available for this user.")
+    with st.expander("📋 Attraction snapshot", expanded=False):
         a_snap = attraction_snapshot(insights, int(
             attrs.loc[attrs["Attraction"].astype(str) == selected_attr, "AttractionId"].iloc[0]
         ))
-        with s2:
-            st.markdown("**Attraction**")
-            if a_snap:
-                st.markdown(
-                    f'<div class="snapshot-card">'
-                    f'🏷️ {a_snap["type"]}<br>'
-                    f'📌 {a_snap["address"]}<br>'
-                    f'🧳 {a_snap["visit_count"]} recorded visits<br>'
-                    f'⭐ {a_snap["avg_rating"]:.2f} average rating'
-                    f'</div>', unsafe_allow_html=True
-                )
-                if len(a_snap["mode_counts"]) > 0:
-                    st.caption("Who typically visits:")
-                    st.bar_chart(a_snap["mode_counts"])
-            else:
-                st.caption("No history available for this attraction.")
+        st.markdown("**Attraction**")
+        if a_snap:
+            st.markdown(
+                f'<div class="snapshot-card">'
+                f'🏷️ {a_snap["type"]}<br>'
+                f'📌 {a_snap["address"]}<br>'
+                f'🧳 {a_snap["visit_count"]} recorded visits<br>'
+                f'⭐ {a_snap["avg_rating"]:.2f} average rating'
+                f'</div>', unsafe_allow_html=True
+            )
+            if len(a_snap["mode_counts"]) > 0:
+                st.caption("Who typically visits:")
+                st.bar_chart(a_snap["mode_counts"])
+        else:
+            st.caption("No history available for this attraction.")
 
     if st.button("Predict Visit Mode", type="primary", use_container_width=True):
         try:
@@ -763,37 +745,22 @@ elif page == "⭐ Attraction Rating Prediction":
         selected_attr = st.selectbox("Attraction", attr_names, index=attr_index, key="reg_attr")
         month = st.slider("Visit Month", 1, 12, 12, key="reg_month")
 
-    with st.expander("📋 User & attraction snapshot", expanded=False):
-        s1, s2 = st.columns(2)
-        u_snap = user_history_snapshot(insights, user_id)
-        with s1:
-            st.markdown("**User**")
-            if u_snap:
-                st.markdown(
-                    f'<div class="snapshot-card">'
-                    f'📍 {u_snap["country"]}, {u_snap["region"]}, {u_snap["continent"]}<br>'
-                    f'🧳 {u_snap["visit_count"]} past visit(s) in the dataset<br>'
-                    f'⭐ {u_snap["avg_rating"]:.2f} average rating given'
-                    f'</div>', unsafe_allow_html=True
-                )
-            else:
-                st.caption("No history available for this user.")
+    with st.expander("📋 Attraction snapshot", expanded=False):
         a_snap = attraction_snapshot(insights, int(
             attrs.loc[attrs["Attraction"].astype(str) == selected_attr, "AttractionId"].iloc[0]
         ))
-        with s2:
-            st.markdown("**Attraction**")
-            if a_snap:
-                st.markdown(
-                    f'<div class="snapshot-card">'
-                    f'🏷️ {a_snap["type"]}<br>'
-                    f'📌 {a_snap["address"]}<br>'
-                    f'🧳 {a_snap["visit_count"]} recorded visits<br>'
-                    f'⭐ {a_snap["avg_rating"]:.2f} average rating'
-                    f'</div>', unsafe_allow_html=True
-                )
-            else:
-                st.caption("No history available for this attraction.")
+        st.markdown("**Attraction**")
+        if a_snap:
+            st.markdown(
+                f'<div class="snapshot-card">'
+                f'🏷️ {a_snap["type"]}<br>'
+                f'📌 {a_snap["address"]}<br>'
+                f'🧳 {a_snap["visit_count"]} recorded visits<br>'
+                f'⭐ {a_snap["avg_rating"]:.2f} average rating'
+                f'</div>', unsafe_allow_html=True
+            )
+        else:
+            st.caption("No history available for this attraction.")
 
     if st.button("Predict Rating", type="primary", use_container_width=True):
         try:
