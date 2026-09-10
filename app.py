@@ -664,8 +664,13 @@ elif page == "🎯 Visitor Mode Prediction":
                 f'</div>', unsafe_allow_html=True
             )
             if len(a_snap["mode_counts"]) > 0:
-                st.caption("Who typically visits:")
+                st.caption("Who typically visits (all visitors to this attraction, historically):")
                 st.bar_chart(a_snap["mode_counts"])
+                st.caption(
+                    "ℹ️ This reflects everyone who has visited this attraction. "
+                    "The prediction below is personalized to the selected User ID, "
+                    "so it can differ from this attraction-wide trend."
+                )
         else:
             st.caption("No history available for this attraction.")
 
