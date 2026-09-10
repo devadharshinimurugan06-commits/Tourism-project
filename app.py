@@ -88,18 +88,14 @@ raw = load_raw()
 
 @st.cache_data
 def build_attraction_location(raw):
-    """Correct attraction-level location, built fresh from the raw item/city/
-    country tables. Fixes the bug where CityName/Country showed the VISITING
-    USER's home city instead of the attraction's own location."""
+    """Uses AttractionAddress directly — the only reliable location field.
+    AttractionCityId in the Item table is not usable: multiple different
+    real attractions (Kuta Beach, Nusa Dua Beach, Sacred Monkey Forest
+    Sanctuary) all share AttractionCityId=1, so joining it to the City
+    table produces meaningless, incorrect results (e.g. showing a random
+    unrelated country instead of the attraction's real location)."""
     item = raw["Updated_Item.xlsx"].copy()
-    city = raw["City.xlsx"].copy()
-    country = raw["Country.xlsx"].copy()
-
-    loc = item[["AttractionId", "Attraction", "AttractionCityId"]].merge(
-        city, left_on="AttractionCityId", right_on="CityId", how="left"
-    )
-    loc = loc.merge(country, on="CountryId", how="left")
-    loc = loc[["AttractionId", "Attraction", "CityName", "Country"]].drop_duplicates("Attraction")
+    loc = item[["AttractionId", "Attraction", "AttractionAddress"]].drop_duplicates("Attraction")
     return loc
 
 attraction_location = build_attraction_location(raw)
@@ -864,16 +860,16 @@ elif page == "🧭 Recommendation":
     if not sel_row.empty:
         r0 = sel_row.iloc[0]
         loc_row = attraction_location[attraction_location["Attraction"].astype(str) == selected_attr]
-        city_val = loc_row["CityName"].iloc[0] if not loc_row.empty else r0.get("CityName", "Unknown")
-        country_val = loc_row["Country"].iloc[0] if not loc_row.empty else r0.get("Country", "Unknown")
+        address_val = loc_row["AttractionAddress"].iloc[0] if not loc_row.empty else "Unknown"
         st.markdown(
             f'<div class="snapshot-card">'
             f'🏷️ {r0.get("AttractionType","Unknown")} &nbsp;|&nbsp; '
-            f'📍 {city_val}, {country_val} &nbsp;|&nbsp; '
+            f'📍 {address_val} &nbsp;|&nbsp; '
             f'🧳 {int(r0.get("VisitCount",0)):,} visits &nbsp;|&nbsp; '
             f'🔥 popularity score {float(r0.get("PopularityScore",0)):.2f}'
             f'</div>', unsafe_allow_html=True
         )
+
     if st.button("Recommend Attractions", type="primary", use_container_width=True):
         try:
             result = get_recommendations(selected_attr, top_n)
